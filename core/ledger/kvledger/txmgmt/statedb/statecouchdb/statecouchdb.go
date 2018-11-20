@@ -35,8 +35,6 @@ const (
 	deletedField  = "_deleted"
 )
 
-var reservedFields = []string{idField, revField, versionField, deletedField}
-
 var dbArtifactsDirFilter = map[string]bool{"META-INF/statedb/couchdb/indexes": true}
 
 // querySkip is implemented for future use by query paging
@@ -213,15 +211,26 @@ func (vdb *VersionedDB) Close() {
 
 // ValidateKeyValue implements method in VersionedDB interface
 func (vdb *VersionedDB) ValidateKeyValue(key string, value []byte) error {
-	if !utf8.ValidString(key) {
-		return fmt.Errorf("Key should be a valid utf8 string: [%x]", key)
+	err := validateKey(key)
+	if err != nil {
+		return err
 	}
 	var jsonMap map[string]interface{}
-	err := json.Unmarshal([]byte(value), &jsonMap)
+	err = json.Unmarshal([]byte(value), &jsonMap)
 	if err == nil {
 		// the value is a proper json and hence perform a check that this json does not contain reserved field
 		// if error is not nil then the value will be treated as a binary attachement.
 		return checkReservedFieldsNotUsed(jsonMap)
+	}
+	return nil
+}
+
+func validateKey(key string) error {
+	if !utf8.ValidString(key) {
+		return fmt.Errorf("Key should be a valid utf8 string: [%x]", key)
+	}
+	if strings.HasPrefix(key, "_") {
+		return fmt.Errorf("The key [%s] is not valid for the CouchDB state database.  The key must not begin with \"_\"", key)
 	}
 	return nil
 }
@@ -1010,9 +1019,9 @@ func createCouchdbDocJSON(id, revision string, value []byte, version *version.He
 
 // checkReservedFieldsNotUsed verifies that the reserve field was not included
 func checkReservedFieldsNotUsed(jsonMap map[string]interface{}) error {
-	for _, fieldName := range reservedFields {
-		if _, fieldFound := jsonMap[fieldName]; fieldFound {
-			return fmt.Errorf("The reserved field %s was found", fieldName)
+	for fieldName := range jsonMap {
+		if fieldName == versionField || strings.HasPrefix(fieldName, "_") {
+			return fmt.Errorf("The field [%s] is not valid for the CouchDB state database", fieldName)
 		}
 	}
 	return nil
